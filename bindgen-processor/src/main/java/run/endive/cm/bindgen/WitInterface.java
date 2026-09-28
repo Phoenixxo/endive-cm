@@ -61,9 +61,9 @@ final class WitInterface {
         return slash < 0 ? name : name.substring(slash + 1);
     }
 
-    /** The Java member name, including the version when the interface has one. */
+    /** The Java member name, stable across versions of the interface. */
     String javaName() {
-        return Names.versionedMember(simpleName());
+        return Names.member(Names.withoutVersion(simpleName()));
     }
 
     /**

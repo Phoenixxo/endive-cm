@@ -1,6 +1,5 @@
 package run.endive.cm.bindgen;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Set;
 
 /**
@@ -109,19 +108,12 @@ final class Names {
         return name;
     }
 
-    /**
-     * A WIT name as a Java package segment. A version adds the same suffix used for member names.
-     */
+    /** A WIT name as a Java package segment, without its version. */
     static String packageSegment(String witName) {
-        int at = witName.indexOf('@');
-        if (at >= 0) {
-            return packageSegment(witName.substring(0, at))
-                    + versionSuffix(witName.substring(at + 1));
-        }
-
-        StringBuilder result = new StringBuilder(witName.length());
-        for (int i = 0; i < witName.length(); i++) {
-            char c = witName.charAt(i);
+        String name = withoutVersion(witName);
+        StringBuilder result = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
             if (c != '-') {
                 result.append(Character.toLowerCase(c));
             }
@@ -131,29 +123,10 @@ final class Names {
         return RESERVED.contains(segment) ? segment + "_" : segment;
     }
 
-    /**
-     * A WIT name as a Java member name. The version suffix keeps interface versions distinct.
-     */
-    static String versionedMember(String witName) {
+    /** Leaves the WIT version out of names used by Java source. */
+    static String withoutVersion(String witName) {
         int at = witName.indexOf('@');
-        if (at < 0) {
-            return member(witName);
-        }
-        return member(witName.substring(0, at)) + versionSuffix(witName.substring(at + 1));
-    }
-
-    /**
-     * Encodes a version as UTF-8 hex so punctuation cannot collapse two versions into one name.
-     * For example, {@code 0.2.0} becomes {@code _v302e322e30}.
-     */
-    private static String versionSuffix(String version) {
-        byte[] bytes = version.getBytes(StandardCharsets.UTF_8);
-        StringBuilder result = new StringBuilder(2 + bytes.length * 2).append("_v");
-        for (byte value : bytes) {
-            result.append(Character.forDigit((value >>> 4) & 0xf, 16));
-            result.append(Character.forDigit(value & 0xf, 16));
-        }
-        return result.toString();
+        return at < 0 ? witName : witName.substring(0, at);
     }
 
     private static String join(String witName, boolean leadingCapital) {

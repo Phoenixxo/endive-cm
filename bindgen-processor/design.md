@@ -306,14 +306,14 @@ split, and it is what lets a world import and export one name at once.
 The point of it is the use site. A type reached as `ImportSomeResources.Logging.Level` cannot be imported and has to be
 written whole every time. As `Level` in a package of its own it is imported once.
 
-Unversioned package segments are lowercase with the words run together, since Google's Java style allows no
-underscores, which is why `imported-resources` becomes `importedresources`. Real WASI ids are mostly single words, so
-the run-together spelling rarely shows.
+Java package segments are lowercase with the words run together, since Google's Java style allows no underscores.
+For example, `imported-resources` becomes `importedresources`. Real WASI ids are mostly single words, so the
+run-together spelling rarely shows.
 
-Versioned interface ids add `_v` and the lowercase hexadecimal UTF-8 bytes of the version to their Java package
-segment and member name. For example, `streams@0.2.0` becomes `streams_v302e322e30`. Encoding the entire version keeps
-`1.2.3-a.b` distinct from `1.2.3-a-b`, and `1.2.3-a-b` distinct from `1.2.3-ab`. Unversioned interfaces keep their
-existing names. Component Model imports and exports still use the original WIT id.
+A versioned WIT id keeps its version for component imports and exports, but Java package segments and member names
+use the unversioned interface name. For example, `streams@0.2.0` and `streams@0.2.1` both generate a `streams` package
+and accessor. Updating the WIT package's patch version does not rename Java types or methods. A Java library can
+express which WIT version it implements through its own artifact version.
 
 Two things follow from generating more than one file.
 

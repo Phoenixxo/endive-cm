@@ -3,7 +3,6 @@ package run.endive.cm.bindgen;
 import static com.google.testing.compile.CompilationSubject.assertThat;
 import static com.google.testing.compile.Compiler.javac;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import com.google.testing.compile.Compilation;
 import com.google.testing.compile.JavaFileObjects;
@@ -590,12 +589,16 @@ class BindgenProcessorTest {
                                         + "public class VersionedHost {}\n"));
 
         assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.VersionedImports")
+                .contentsAsUtf8String()
+                .contains("\"example:versioned-imports/streams@0.2.0\"");
 
         assertGenerated(
                 compilation,
                 List.of(
                         "endive.testing.VersionedImports",
-                        "endive.testing.example.versionedimports.streams_v302e322e30.Host"));
+                        "endive.testing.example.versionedimports.streams.Host"));
     }
 
     @Test
@@ -611,22 +614,31 @@ class BindgenProcessorTest {
                                         + "public class VersionedExportHost {}\n"));
 
         assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.VersionedExports")
+                .contentsAsUtf8String()
+                .contains("\"example:versioned-imports/streams@0.2.0\"");
 
         assertGenerated(
                 compilation,
                 List.of(
                         "endive.testing.VersionedExports",
-                        "endive.testing.exports.example.versionedimports.streams_v302e322e30.Guest"));
+                        "endive.testing.exports.example.versionedimports.streams.Guest"));
     }
 
     @Test
-    void versionedNamesDoNotCollideOnPunctuation() {
-        String dotted = "streams@1.2.3-a.b";
-        String dashed = "streams@1.2.3-a-b";
-        String compressed = "streams@1.2.3-ab";
+    void versionedJavaNamesAreStableAcrossPatchVersions() {
+        WitInterface first =
+                new WitInterface(
+                        "wasi:io/streams@0.2.0", List.of(), List.of(), List.of(), new WitScope());
+        WitInterface next =
+                new WitInterface(
+                        "wasi:io/streams@0.2.1", List.of(), List.of(), List.of(), new WitScope());
 
-        assertNotEquals(Names.versionedMember(dotted), Names.versionedMember(dashed));
-        assertNotEquals(Names.packageSegment(dashed), Names.packageSegment(compressed));
+        assertEquals(first.javaName(), next.javaName());
+        assertEquals(
+                first.javaPackage("endive.testing", false),
+                next.javaPackage("endive.testing", false));
     }
 
     private static Compilation compile(String resource) {
