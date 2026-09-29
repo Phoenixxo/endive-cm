@@ -311,9 +311,10 @@ For example, `imported-resources` becomes `importedresources`. Real WASI ids are
 run-together spelling rarely shows.
 
 A versioned WIT id keeps its version for component imports and exports, but Java package segments and member names
-use the unversioned interface name. For example, `streams@0.2.0` and `streams@0.2.1` both generate a `streams` package
-and accessor. Updating the WIT package's patch version does not rename Java types or methods. A Java library can
-express which WIT version it implements through its own artifact version.
+use the unversioned interface name. For example, `streams@0.2.0` and `streams@0.3.0` both generate a `streams` package
+and accessor. Changing the WIT version does not by itself rename Java types or methods. A Java library can express
+which WIT version it implements through its own artifact version. A world importing both versions cannot generate
+both into one Java package, so bindgen reports the conflicting WIT ids.
 
 Two things follow from generating more than one file.
 

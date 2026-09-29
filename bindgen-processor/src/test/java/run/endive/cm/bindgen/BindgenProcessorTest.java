@@ -3,6 +3,8 @@ package run.endive.cm.bindgen;
 import static com.google.testing.compile.CompilationSubject.assertThat;
 import static com.google.testing.compile.Compiler.javac;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.testing.compile.Compilation;
 import com.google.testing.compile.JavaFileObjects;
@@ -627,6 +629,56 @@ class BindgenProcessorTest {
     }
 
     @Test
+    void anonymousResultInVersionedInterfaceHasValidExceptionName() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.VersionedResultHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"versioned-results\", path ="
+                                        + " \"wit/versioned-results.wit\")\n"
+                                        + "public class VersionedResultHost {}\n"));
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertGenerated(
+                compilation,
+                List.of(
+                        "endive.testing.VersionedResults",
+                        "endive.testing.wasi.cli.run.Host",
+                        "endive.testing.wasi.cli.run.RunResult0Exception"));
+    }
+
+    @Test
+    void twoVersionsOfOneInterfaceReportTheConflictingIds() {
+        WitInterface first =
+                new WitInterface(
+                        "wasi:io/streams@0.2.0", List.of(), List.of(), List.of(), new WitScope());
+        WitInterface next =
+                new WitInterface(
+                        "wasi:io/streams@0.3.0", List.of(), List.of(), List.of(), new WitScope());
+        WitWorld world =
+                new WitWorld(
+                        "two-versions",
+                        "example:versions/two-versions",
+                        List.of(),
+                        List.of(first, next),
+                        List.of(),
+                        List.of());
+
+        BindgenException error =
+                assertThrows(
+                        BindgenException.class,
+                        () ->
+                                WorldGenerator.generate(
+                                        world, "endive.testing", BindgenProcessor.class.getName()));
+
+        assertTrue(error.getMessage().contains("wasi:io/streams@0.2.0"));
+        assertTrue(error.getMessage().contains("wasi:io/streams@0.3.0"));
+        assertTrue(error.getMessage().contains("endive.testing.wasi.io.streams"));
+    }
+
+    @Test
     void versionedJavaNamesAreStableAcrossPatchVersions() {
         WitInterface first =
                 new WitInterface(
@@ -635,7 +687,8 @@ class BindgenProcessorTest {
                 new WitInterface(
                         "wasi:io/streams@0.2.1", List.of(), List.of(), List.of(), new WitScope());
 
-        assertEquals(first.javaName(), next.javaName());
+        assertEquals("streams", first.simpleName());
+        assertEquals(first.simpleName(), next.simpleName());
         assertEquals(
                 first.javaPackage("endive.testing", false),
                 next.javaPackage("endive.testing", false));
