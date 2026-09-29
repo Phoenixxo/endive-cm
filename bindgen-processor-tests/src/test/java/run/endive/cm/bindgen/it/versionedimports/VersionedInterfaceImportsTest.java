@@ -13,7 +13,7 @@ import run.endive.cm.runtime.Bindgen;
 import run.endive.cm.runtime.ComponentStore;
 import run.endive.cm.types.WasmComponent;
 
-/** A versioned interface import keeps its WIT id for linking and a plain Java name for the host. */
+/** Runs a guest that calls a versioned interface through its generated Java host binding. */
 @Bindgen(world = "versioned-with-imports", path = "wit/versioned-with-imports.wit")
 public class VersionedInterfaceImportsTest {
 

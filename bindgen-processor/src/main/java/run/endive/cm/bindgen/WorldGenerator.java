@@ -61,7 +61,7 @@ final class WorldGenerator {
         return sources;
     }
 
-    /** Two versions of an interface cannot generate into the same Java package. */
+    /** Fails when two WIT interfaces would generate into the same Java package. */
     private void checkInterfacePackages() {
         Map<String, String> interfaces = new HashMap<>();
         for (WitInterface imported : world.importedInterfaces()) {

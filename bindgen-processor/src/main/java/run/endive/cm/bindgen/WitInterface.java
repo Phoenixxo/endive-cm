@@ -55,7 +55,7 @@ final class WitInterface {
         return scope;
     }
 
-    /** The interface's own name, without its package qualification or version. */
+    /** The interface name without its package or version. */
     String simpleName() {
         return Names.simpleName(name);
     }

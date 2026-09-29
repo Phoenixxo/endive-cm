@@ -109,8 +109,9 @@ final class Names {
     }
 
     /**
-     * A WIT name as a Java package segment, without its version. A Java reserved word gains a
-     * trailing underscore, so a WIT package named {@code class} remains a legal Java package.
+     * A WIT name as a Java package segment, without its version.
+     *
+     * <p>A Java reserved word gains a trailing underscore, so {@code class} becomes {@code class_}.
      */
     static String packageSegment(String witName) {
         String name = withoutVersion(witName);
@@ -132,7 +133,7 @@ final class Names {
         return at < 0 ? witName : witName.substring(0, at);
     }
 
-    /** The interface's own name, without its package qualification or version. */
+    /** The unqualified, unversioned name of a WIT interface. */
     static String simpleName(String witName) {
         int slash = witName.lastIndexOf('/');
         return withoutVersion(slash < 0 ? witName : witName.substring(slash + 1));
