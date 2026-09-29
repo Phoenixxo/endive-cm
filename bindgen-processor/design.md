@@ -405,8 +405,9 @@ rather than from a name passed alongside, so the two cannot disagree.
 JavaParser's printer writes a tree structurally rather than by precedence. Without that,
 `((VariantValue) value).label()` would print as `(VariantValue) value.label()`.
 
-`WorldReader` refuses what it cannot yet read rather than guessing. An alias that introduces a type would shift every
-index after it, so a world using types from an interface is rejected by name instead of being mis-numbered in silence.
+`WorldReader` refuses what it cannot yet read rather than guessing. An alias grows a type index space like any other
+declaration, so every alias is followed to the type it names rather than skipped, since skipping one would mis-number
+every index after it in silence.
 
 The Hello World world generates this, verified against a checked-in expected source and run end to end in
 `bindgen-processor-tests` against a component built with `component embed` and `component new`. Instantiating it links,
@@ -453,6 +454,9 @@ public interface Host {
 
 The interface is resolved from `Imports` once at instantiation rather than per call, and wired in with `HostInstance`.
 Function type constants are prefixed by the interface they belong to, so two interfaces may each declare a `tick`.
+
+An interface that leaves the embedder nothing to implement, such as one declaring only the types others `use`, gets no
+`Host` and no accessor. Its instance is still built, so a component can alias its types.
 
 A resource a world exports is implemented by the guest rather than by the host, so the handle runs the other way. It
 becomes an `AutoCloseable` wrapper holding the handle the constructor returned.
@@ -623,10 +627,30 @@ the embedder's call in a `try` that catches only the generated exception and tur
 Catching every `RuntimeException` there would deliver a genuine bug in embedder code to the guest as a well formed
 error, which is why the catch is narrow.
 
-A world's `use`, an interface that uses types from elsewhere, a compound type on a world's bare function import, and
-a `result` reached as anything but a function's own result are each rejected with a message naming what is
-unsupported. The bare function import is a limit of `HostFunction`, which builds an instance with no type space,
-leaving an index nothing to resolve.
+An interface may also `use` a type another interface declares, and so may a world. The encoding carries a `use` as
+two aliases. The world aliases the type out of the instance it imports for the declaring interface, and the using
+interface reaches that with an `alias outer`. `WorldReader` follows both, tracking the world's instance index space so
+that an alias names the right interface, and a type a world names arrives as an imported type bound to the alias.
+
+A used type belongs to the interface declaring it. It is generated there once, and every reference names it in that
+package, however many uses it passes through. `WitScope` records where each used slot came from, because a used type
+keeps the numbering of the space declaring it. Anything looking inside one, such as a list alias's element or a
+record's fields, has to resolve against that space rather than the user's.
+
+A host instance still has a type index space of its own, so a used type is declared into it again, and whatever the
+type names is declared first, against the declaring interface's numbering. A component aliases a used type out of the
+instance declaring it, so every named type an imported interface declares is also exported from its host instance
+through `HostInstance.Builder.addType`.
+
+A used resource is refused, because the using instance has to share the runtime resource type the declaring instance
+brought into existence, and nothing wires that yet. A used `result` is refused too, since its exception belongs to the
+declaring interface's package while the functions throwing it are generated elsewhere. `use` on an exported interface
+is refused, because only the host side resolves a used type to its declaring package. A type a world declares in its
+own right has no package to be generated into, so it is refused as well.
+
+A compound type on a world's bare function import and a `result` reached as anything but a function's own result are
+each rejected with a message naming what is unsupported. The bare function import is a limit of `HostFunction`, which
+builds an instance with no type space, leaving an index nothing to resolve.
 
 ## Fidelity to the bindgen! examples
 
@@ -634,11 +658,8 @@ The WIT under `src/test/resources/wit` in `bindgen-processor` is the bindgen! ex
 That is what the approved files are generated from, so a difference from the example is visible rather than assumed.
 
 All seven of the non-async example worlds are present. A world covering a WIT feature no example declares is written
-for the purpose and named after it, which is where `record-types`, `variant-types` and `static-functions` come from,
-and each such fixture says so at the top.
-
-All seven of the non-async example worlds are present. `result-types` is not one of them, because no bindgen! example
-uses a `result`, so that world is written for these tests and its fixtures say so at the top.
+for the purpose and named after it, such as `record-types`, `result-types` or `use-types`, and each such fixture says
+so at the top.
 
 The end-to-end fixtures use the same WIT, with one exception that has to be stated wherever it appears. A world that
 imports without exporting cannot be driven, since nothing enters the guest, so `with-imports`,
@@ -700,6 +721,7 @@ Generating bindings needed public API the runtime did not have. All of it is in 
 | Type | For |
 |---|---|
 | `HostInstance` | Building an instance the embedder supplies, declaring types and resources into it |
+| `HostInstance.Builder.addType` | Exporting a declared type, which a component using it aliases by name |
 | `HostFunction` | An import declared as a bare function, which belongs to no instance |
 | `HostResource` | A resource type the embedder implements, with its `own` and `borrow` |
 | `HostResourceTable` | Mapping a resource representation to the Java object it stands for |
@@ -718,22 +740,32 @@ Nothing here is started. Each item says what it is and what makes it awkward, so
 `WorldReader` and `WitTypes` reject what they cannot read, by name, rather than guessing. Everything below fails that
 way today, which means adding one is a matter of finding its rejection and replacing it.
 
-- **`record`, `tuple`, `flags`.** The largest gap. A record despecializes to something the ABI carries as a
-  `java.util.Map`, so a generated class needs conversion at the boundary the way an enum already does. This is the
-  remaining half of [Generated types are nominal](#generated-types-are-nominal-and-cross-the-boundary-through-descriptors).
-- **`variant`, `option`.** Both carried as `VariantValue`, so they follow the enum pattern, but a variant case has a
-  payload and `option` wants an idiomatic Java shape rather than a literal case class.
+- **A resource handle anywhere but a receiver or a constructor's result.** A method's `self` and what a constructor,
+  or a static returning its own resource, hands back are wired. An `own` or `borrow` as any other parameter or result,
+  including one returning another resource's handle, fails as `own is not yet supported`, and a record field holding
+  one is refused where the record is declared. Converting one needs the resource's `HostResourceTable` and
+  `HostResource`, which are locals of `instantiate`, so a generated type carrying a handle has no way to reach them
+  from its own `toComponent` and `fromComponent`.
+- **`stream`, `future`, `error-context`, `map` and fixed-size lists.** None has a Java mapping yet. The first three
+  belong to async, which the runtime rejects throughout.
 - **A `result` on a function a world declares in its own right.** The exception generated for one lives in the Java
   package of the interface declaring the result, and a world declares no such package. Moving a result into an
   interface is enough, and the refusal says so.
-- **A resource's `static` functions.** `[static]file.open` is recognised and rejected in
-  `WorldReader.ResourceFunctions.add`. It maps to a static Java method, so the wiring is simpler than a method's.
-- **A world's `use`, and an interface using types from elsewhere.** Both are aliases that grow the type index space,
-  which `WorldReader.track` refuses rather than mis-number. Supporting them means resolving an alias to the interface
-  that declared the type and referring to the Java type already generated for it.
+- **A used resource, a used `result`, and `use` on an exported interface.** A `use` of anything else resolves to the
+  interface declaring it. A used resource needs the using host instance to share the declaring instance's runtime
+  resource type, and a handle crossing inside a generated type needs the resource tables that live in `instantiate`.
+  A used `result` needs its exception reached in the declaring package. An exported interface needs the guest side to
+  resolve a used type the way the host side already does.
+- **A type a world declares in its own right.** A world has no Java package for one to be generated into.
 - **A compound type on a world's bare function import.** `HostFunction` builds an instance with no type space,
   leaving an index nothing to resolve. Either `HostFunction` grows type declarations or such an import is built
   through `HostInstance` like an interface.
+
+A few refusals are limits of the chosen Java shapes rather than missing work, and
+[What Is Built](#what-is-built) gives the reason for each. They are `option<option<T>>`, a `result` reached as a value
+rather than as a function's own result, a tuple wider than `Tuple8` or holding an element that cannot be named by its
+class, a variant case named after its variant or after a type its interface declares, and a flags type whose Java name
+would be `Flag`.
 
 ### Multi-file WIT packages
 
