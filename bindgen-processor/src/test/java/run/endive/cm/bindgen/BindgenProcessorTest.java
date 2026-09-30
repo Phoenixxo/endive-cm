@@ -39,9 +39,9 @@ class BindgenProcessorTest {
 
         assertThat(compilation).succeeded();
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.HelloWorld")
+                .generatedSourceFile("endive.testing.HelloWorldWorld")
                 .contentsAsUtf8String()
-                .contains("public static HelloWorld instantiate(");
+                .contains("public static HelloWorldWorld instantiate(");
     }
 
     /**
@@ -71,7 +71,9 @@ class BindgenProcessorTest {
         assertThat(compilation).succeededWithoutWarnings();
         assertGenerated(
                 compilation,
-                List.of("endive.testing.UnusedFuture", "endive.testing.my.project.logging.Host"));
+                List.of(
+                        "endive.testing.UnusedFutureWorld",
+                        "endive.testing.my.project.logging.Host"));
     }
 
     /**
@@ -118,7 +120,7 @@ class BindgenProcessorTest {
                 .contentsAsUtf8String()
                 .contains("VariantValue.of(\"none\", null)");
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.Seams")
+                .generatedSourceFile("endive.testing.SeamsWorld")
                 .contentsAsUtf8String()
                 .contains("Profile.fromComponent(element)");
     }
@@ -153,7 +155,7 @@ class BindgenProcessorTest {
 
         assertThat(compilation).succeededWithoutWarnings();
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.Nest")
+                .generatedSourceFile("endive.testing.NestWorld")
                 .contentsAsUtf8String()
                 .contains("element1 ->");
     }
@@ -284,13 +286,13 @@ class BindgenProcessorTest {
 
         assertThat(compilation).succeededWithoutWarnings();
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.UsedRecord")
+                .generatedSourceFile("endive.testing.UsedRecordWorld")
                 .contentsAsUtf8String()
                 .contains(
                         "ValType loggingTypesLevel = loggingBuilder.declareType(Type.of("
                                 + "EnumType.builder()");
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.UsedRecord")
+                .generatedSourceFile("endive.testing.UsedRecordWorld")
                 .contentsAsUtf8String()
                 .contains("withLabel(\"level\").withValType(loggingTypesLevel)");
     }
@@ -359,7 +361,7 @@ class BindgenProcessorTest {
         assertGenerated(
                 compilation,
                 List.of(
-                        "endive.testing.Chain",
+                        "endive.testing.ChainWorld",
                         "endive.testing.example.chain.base.Level",
                         "endive.testing.example.chain.middle.Note",
                         "endive.testing.example.chain.top.Host"));
@@ -371,9 +373,12 @@ class BindgenProcessorTest {
                                 + " endive.testing.example.chain.base.Level l);");
     }
 
-    /** A used resource has to share its runtime type with the interface declaring it. */
+    /**
+     * A used resource keeps the runtime type the declaring interface brought into existence, and
+     * converts through that interface's {@code Handles}, even under a name of the user's own.
+     */
     @Test
-    void aUsedResourceIsRefused() {
+    void aUsedResourceKeepsTheDeclaringInterfacesType() {
         Compilation compilation =
                 compile(
                         JavaFileObjects.forSourceString(
@@ -386,8 +391,8 @@ class BindgenProcessorTest {
                                         + "  resource pollable { ready: func() -> bool; }\\n"
                                         + "}\\n"
                                         + "interface streams {\\n"
-                                        + "  use poll.{pollable};\\n"
-                                        + "  subscribe: func() -> pollable;\\n"
+                                        + "  use poll.{pollable as ticket};\\n"
+                                        + "  subscribe: func() -> ticket;\\n"
                                         + "}\\n"
                                         + "world used-resource {\\n"
                                         + "  import streams;\\n"
@@ -395,11 +400,51 @@ class BindgenProcessorTest {
                                         + "}\\n\")\n"
                                         + "public class UsedResourceHost {}\n"));
 
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.example.used.streams.Host")
+                .contentsAsUtf8String()
+                .contains("endive.testing.example.used.poll.Pollable subscribe();");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.UsedResourceWorld")
+                .contentsAsUtf8String()
+                .contains(
+                        "HostResource streamsTicket ="
+                            + " streamsBuilder.useResource(pollHandles.pollableResourceType());");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.UsedResourceWorld")
+                .contentsAsUtf8String()
+                .contains("streamsBuilder.addResource(\"ticket\", streamsTicket);");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.UsedResourceWorld")
+                .contentsAsUtf8String()
+                .contains("pollHandles.ownPollable(streams.subscribe())");
+    }
+
+    /** Only an interface's wiring reaches a {@code Handles}, so a world using a resource is refused. */
+    @Test
+    void aResourceAWorldUsesIsRefused() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.WorldResourceHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"world-resource\", inline ="
+                                        + " \"package example:used;\\n"
+                                        + "interface poll {\\n"
+                                        + "  resource pollable { ready: func() -> bool; }\\n"
+                                        + "}\\n"
+                                        + "world world-resource {\\n"
+                                        + "  use poll.{pollable};\\n"
+                                        + "  export go: func();\\n"
+                                        + "}\\n\")\n"
+                                        + "public class WorldResourceHost {}\n"));
+
         assertThat(compilation).failed();
         assertThat(compilation)
                 .hadErrorContaining(
-                        "interface \"example:used/streams\" uses resource \"pollable\" from"
-                                + " \"poll\"");
+                        "world \"world-resource\" uses resource \"pollable\" from \"poll\"");
     }
 
     /** A used result generates its exception into the package of the interface declaring it. */
@@ -546,9 +591,9 @@ class BindgenProcessorTest {
         assertThat(compilation).hadErrorContaining("is named after the variant itself");
     }
 
-    /** A handle to another resource has no Java type to name, so a static returning one is refused. */
+    /** A handle converts through its interface's {@code Handles}, whichever resource returns it. */
     @Test
-    void aStaticReturningAnotherResourcesHandleIsReported() {
+    void aStaticMayReturnAnotherResourcesHandle() {
         Compilation compilation =
                 compile(
                         JavaFileObjects.forSourceString(
@@ -565,8 +610,145 @@ class BindgenProcessorTest {
                                         + "}\\n\")\n"
                                         + "public class OtherHandleHost {}\n"));
 
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.t.t.i.Host")
+                .contentsAsUtf8String()
+                .contains("A bMake();");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.WWorld")
+                .contentsAsUtf8String()
+                .contains("iHandles.ownA(i.bMake())");
+    }
+
+    /** The guest side reaches no {@code Handles}, so a handle crossing there is still refused. */
+    @Test
+    void anExportedStaticReturningAnotherResourcesHandleIsReported() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.ExportedHandleHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"w\", inline = \"package t:t;\\n"
+                                        + "interface i {\\n"
+                                        + "  resource a { constructor(); }\\n"
+                                        + "  resource b { make: static func() -> a; }\\n"
+                                        + "}\\n"
+                                        + "world w {\\n"
+                                        + "  export i;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class ExportedHandleHost {}\n"));
+
         assertThat(compilation).failed();
         assertThat(compilation).hadErrorContaining("own is not yet supported");
+    }
+
+    /**
+     * An owned handle handed to the host passes ownership with it, so the host takes the object out
+     * of its table rather than leaving an entry nothing will drop.
+     */
+    @Test
+    void anOwnedHandleHandedToTheHostIsTaken() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.OwnedArgumentHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"w\", inline = \"package t:t;\\n"
+                                        + "interface i {\\n"
+                                        + "  resource a {}\\n"
+                                        + "  close: func(a: a);\\n"
+                                        + "}\\n"
+                                        + "world w {\\n"
+                                        + "  import i;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class OwnedArgumentHost {}\n"));
+
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.WWorld")
+                .contentsAsUtf8String()
+                .contains("i.close(iHandles.takeA((ResourceValue) args[0]))");
+    }
+
+    /** An exported interface generates no {@code Handles}, so its types carry no handle yet. */
+    @Test
+    void aTypeCarryingAHandleInAnExportedInterfaceIsReported() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.ExportedHandleTypeHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"w\", inline = \"package t:t;\\n"
+                                        + "interface i {\\n"
+                                        + "  resource a { constructor(); }\\n"
+                                        + "  variant outcome { made(a), failed }\\n"
+                                        + "}\\n"
+                                        + "world w {\\n"
+                                        + "  export i;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class ExportedHandleTypeHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation)
+                .hadErrorContaining(
+                        "type \"outcome\" of exported interface \"t:t/i\" carries a resource"
+                                + " handle");
+    }
+
+    /** A world's own functions reach no {@code Handles}, so a type carrying a handle is refused. */
+    @Test
+    void aWorldFunctionNamingATypeCarryingAHandleIsReported() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.WorldHandleTypeHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"w\", inline = \"package t:t;\\n"
+                                        + "interface i {\\n"
+                                        + "  resource a { constructor(); }\\n"
+                                        + "  record held { a: a }\\n"
+                                        + "}\\n"
+                                        + "world w {\\n"
+                                        + "  use i.{held};\\n"
+                                        + "  export make: func() -> held;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class WorldHandleTypeHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation)
+                .hadErrorContaining(
+                        "type \"held\" carries a resource handle, which only an imported"
+                                + " interface's bindings can convert");
+    }
+
+    /** {@code Handles} is generated beside the interface's own types, so one named alike clashes. */
+    @Test
+    void aTypeNamedLikeTheGeneratedHandlesIsReported() {
+        Compilation compilation =
+                compile(
+                        JavaFileObjects.forSourceString(
+                                "endive.testing.HandlesClashHost",
+                                "package endive.testing;\n"
+                                        + "import run.endive.cm.runtime.Bindgen;\n"
+                                        + "@Bindgen(world = \"w\", inline = \"package t:t;\\n"
+                                        + "interface i {\\n"
+                                        + "  resource a { constructor(); }\\n"
+                                        + "  record handles { count: u32 }\\n"
+                                        + "  count: func(h: handles) -> u32;\\n"
+                                        + "}\\n"
+                                        + "world w {\\n"
+                                        + "  import i;\\n"
+                                        + "}\\n\")\n"
+                                        + "public class HandlesClashHost {}\n"));
+
+        assertThat(compilation).failed();
+        assertThat(compilation)
+                .hadErrorContaining("would collide with the generated Handles class");
     }
 
     /**
@@ -641,9 +823,13 @@ class BindgenProcessorTest {
         assertThat(compilation).hadErrorContaining("a function a world declares in its own right");
     }
 
-    /** A record's map has to carry a resource by value, which a handle is not. */
+    /**
+     * A record carrying a handle converts it through the {@code Handles} its conversions take,
+     * minting one on the way out and taking ownership on the way in. An interface sharing a name
+     * with a parameter of {@code instantiate} gives way to it.
+     */
     @Test
-    void aRecordFieldNamingAResourceHandleIsReported() {
+    void aRecordMayCarryAResourceHandle() {
         Compilation compilation =
                 compile(
                         JavaFileObjects.forSourceString(
@@ -663,8 +849,19 @@ class BindgenProcessorTest {
                                         + "}\\n\")\n"
                                         + "public class HandleFieldHost {}\n"));
 
-        assertThat(compilation).failed();
-        assertThat(compilation).hadErrorContaining("names a resource handle");
+        assertThat(compilation).succeededWithoutWarnings();
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.my.project.store.Session")
+                .contentsAsUtf8String()
+                .contains("fields.put(\"c\", storeHandles.ownConn(c));");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.my.project.store.Session")
+                .contentsAsUtf8String()
+                .contains("storeHandles.takeConn((ResourceValue) fields.get(\"c\"))");
+        assertThat(compilation)
+                .generatedSourceFile("endive.testing.HandleFieldWorld")
+                .contentsAsUtf8String()
+                .contains("store_.open().toComponent(store_Handles)");
     }
 
     @Test
@@ -737,7 +934,7 @@ class BindgenProcessorTest {
 
         assertThat(compilation).succeededWithoutWarnings();
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.Kw")
+                .generatedSourceFile("endive.testing.KwWorld")
                 .contentsAsUtf8String()
                 .contains("String new_(String class_)");
     }
@@ -818,14 +1015,14 @@ class BindgenProcessorTest {
 
         assertThat(compilation).succeededWithoutWarnings();
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.VersionedImports")
+                .generatedSourceFile("endive.testing.VersionedImportsWorld")
                 .contentsAsUtf8String()
                 .contains("\"example:versioned-imports/streams@0.2.0\"");
 
         assertGenerated(
                 compilation,
                 List.of(
-                        "endive.testing.VersionedImports",
+                        "endive.testing.VersionedImportsWorld",
                         "endive.testing.example.versionedimports.streams.Host"));
     }
 
@@ -843,14 +1040,14 @@ class BindgenProcessorTest {
 
         assertThat(compilation).succeededWithoutWarnings();
         assertThat(compilation)
-                .generatedSourceFile("endive.testing.VersionedExports")
+                .generatedSourceFile("endive.testing.VersionedExportsWorld")
                 .contentsAsUtf8String()
                 .contains("\"example:versioned-imports/streams@0.2.0\"");
 
         assertGenerated(
                 compilation,
                 List.of(
-                        "endive.testing.VersionedExports",
+                        "endive.testing.VersionedExportsWorld",
                         "endive.testing.exports.example.versionedimports.streams.Guest"));
     }
 
@@ -870,7 +1067,7 @@ class BindgenProcessorTest {
         assertGenerated(
                 compilation,
                 List.of(
-                        "endive.testing.VersionedResults",
+                        "endive.testing.VersionedResultsWorld",
                         "endive.testing.wasi.cli.run.Host",
                         "endive.testing.wasi.cli.run.RunResult0Exception"));
     }

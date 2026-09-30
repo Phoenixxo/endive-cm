@@ -93,6 +93,21 @@ public class ApprovalTest {
     }
 
     @Test
+    public void verifyHandleTypes() {
+        verifyGeneratedBindings("HandleTypesHost.java");
+    }
+
+    @Test
+    public void verifyResourceHandles() {
+        verifyGeneratedBindings("ResourceHandlesHost.java");
+    }
+
+    @Test
+    public void verifyUseResources() {
+        verifyGeneratedBindings("UseResourcesHost.java");
+    }
+
+    @Test
     public void verifyUseTypes() {
         verifyGeneratedBindings("UseTypesHost.java");
     }
