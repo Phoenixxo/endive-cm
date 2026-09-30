@@ -89,7 +89,7 @@ final class WorldGenerator {
     }
 
     private GeneratedUnit worldSource() {
-        String className = Names.type(world.name());
+        String className = Names.worldClass(world.name());
         GeneratedUnit unit = new GeneratedUnit(base, generatedBy);
         FunctionBindings bindings = FunctionBindings.forUnit(unit);
 
@@ -101,7 +101,7 @@ final class WorldGenerator {
             type.addFieldWithInitializer(
                     unit.use(QualifiedTypes.FUNC_TYPE),
                     constantName(imported.name()),
-                    bindings.funcType(imported, 0, null, Map.of()),
+                    bindings.funcType(imported, Map.of()),
                     Modifier.Keyword.PRIVATE,
                     Modifier.Keyword.STATIC,
                     Modifier.Keyword.FINAL);
@@ -248,7 +248,7 @@ final class WorldGenerator {
                             AstBuilders.text(imported.name()),
                             function));
         }
-        HostWiring wiring = new HostWiring(unit, bindings);
+        HostWiring wiring = new HostWiring(unit);
         for (WitInterface imported : world.importedInterfaces()) {
             wiring.addTo(body, imported, VALUES);
         }

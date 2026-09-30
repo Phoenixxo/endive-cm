@@ -63,6 +63,9 @@ final class InterfaceGenerator {
     /** The name a variant case gives the payload it carries, since a WIT case payload has none. */
     private static final String VALUE = "value";
 
+    /** The class an imported interface declaring resources converts every handle through. */
+    static final String HANDLES = "Handles";
+
     private final String generatedBy;
 
     InterfaceGenerator(String generatedBy) {
@@ -82,16 +85,19 @@ final class InterfaceGenerator {
                     sources.add(flagsSource(iface, declared));
                     break;
                 case VARIANT:
-                    sources.add(variantSource(iface, declared));
+                    sources.add(variantSource(iface, declared, exported));
                     break;
                 case RECORD:
-                    sources.add(recordSource(iface, declared));
+                    sources.add(recordSource(iface, declared, exported));
                     break;
                 default:
                     break;
             }
         }
         sources.addAll(exceptionSources(iface));
+        if (!exported && !iface.resources().isEmpty()) {
+            sources.add(handlesSource(iface));
+        }
         for (WitResource resource : iface.resources()) {
             sources.add(
                     exported
@@ -552,10 +558,12 @@ final class InterfaceGenerator {
      * A variant becomes an abstract base class with one nested class per case, told apart with
      * {@code instanceof}. The base carries nothing, so a payload is a field on the case alone.
      */
-    private GeneratedUnit variantSource(WitInterface iface, WitType declared) {
+    private GeneratedUnit variantSource(WitInterface iface, WitType declared, boolean exported) {
         String className = Names.type(declared.name());
         GeneratedUnit unit = unitFor(iface);
         WitTypes types = new WitTypes(unit);
+        List<Parameter> handles =
+                handlesParameters(types, iface, declared, exported, Set.of(VALUE, "variant"));
 
         ClassOrInterfaceDeclaration type = unit.addAbstractClass(className);
         type.setJavadocComment(
@@ -571,17 +579,19 @@ final class InterfaceGenerator {
                 type.addMethod("toComponent", Modifier.Keyword.PUBLIC, Modifier.Keyword.ABSTRACT)
                         .setType(unit.use(QualifiedTypes.VARIANT_VALUE));
         lowered.removeBody();
-        lowered.setJavadocComment("This case as the ABI carries it.");
+        addParameters(lowered, handles);
+        lowered.setJavadocComment("This case as the ABI carries it." + handlesNote(handles));
 
         MethodDeclaration lifted =
                 type.addMethod("fromComponent", Modifier.Keyword.PUBLIC, Modifier.Keyword.STATIC)
                         .setType(AstBuilders.type(className));
         lifted.addParameter(AstBuilders.type("Object"), VALUE);
+        addParameters(lifted, handles);
         lifted.setBody(matchCase(unit, types, iface, declared));
-        lifted.setJavadocComment("The case a lifted value names.");
+        lifted.setJavadocComment("The case a lifted value names." + handlesNote(handles));
 
         for (Case declaredCase : cases(declared)) {
-            type.addMember(caseSource(unit, types, iface, className, declaredCase));
+            type.addMember(caseSource(unit, types, iface, className, declaredCase, handles));
         }
         return unit;
     }
@@ -651,7 +661,8 @@ final class InterfaceGenerator {
             WitTypes types,
             WitInterface iface,
             String baseName,
-            Case declaredCase) {
+            Case declaredCase,
+            List<Parameter> handles) {
         String className = Names.type(declaredCase.label());
         if (className.equals(baseName)) {
             throw new BindgenException(
@@ -698,16 +709,18 @@ final class InterfaceGenerator {
             payload = types.toComponent(new NameExpr(VALUE), declaredCase.valType(), iface.scope());
         }
 
-        type.addMethod("toComponent", Modifier.Keyword.PUBLIC)
-                .setType(unit.use(QualifiedTypes.VARIANT_VALUE))
-                .setBody(
-                        returning(
-                                AstBuilders.call(
-                                        unit.useName(QualifiedTypes.VARIANT_VALUE),
-                                        "of",
-                                        AstBuilders.text(declaredCase.label()),
-                                        payload)))
-                .addMarkerAnnotation("Override");
+        MethodDeclaration lowered =
+                type.addMethod("toComponent", Modifier.Keyword.PUBLIC)
+                        .setType(unit.use(QualifiedTypes.VARIANT_VALUE))
+                        .setBody(
+                                returning(
+                                        AstBuilders.call(
+                                                unit.useName(QualifiedTypes.VARIANT_VALUE),
+                                                "of",
+                                                AstBuilders.text(declaredCase.label()),
+                                                payload)));
+        addParameters(lowered, handles);
+        lowered.addMarkerAnnotation("Override");
 
         type.addMember(equalsMethod(unit, className, declaredCase.hasValType()));
         type.addMember(hashCodeMethod(unit, declaredCase));
@@ -787,6 +800,62 @@ final class InterfaceGenerator {
         return method;
     }
 
+    /**
+     * The {@code Handles} a generated type's conversions take, one for each interface whose
+     * resources the type carries a handle to, named clear of {@code taken}. The unit's own
+     * conversions reach those handles through the parameters.
+     *
+     * <p>An exported interface generates no {@code Handles}, so a type there carrying a handle is
+     * refused where it is declared.
+     */
+    private List<Parameter> handlesParameters(
+            WitTypes types,
+            WitInterface iface,
+            WitType declared,
+            boolean exported,
+            Set<String> taken) {
+        List<WitScope> scopes = types.handleScopes(declared.defValType(), iface.scope());
+        if (scopes.isEmpty()) {
+            return List.of();
+        }
+        if (exported) {
+            throw new BindgenException(
+                    "type \""
+                            + declared.name()
+                            + "\" of exported interface \""
+                            + iface.name()
+                            + "\" carries a resource handle, which is not yet supported");
+        }
+        Set<String> names = new HashSet<>(taken);
+        List<Parameter> parameters = new ArrayList<>();
+        Map<WitScope, String> byScope = new IdentityHashMap<>();
+        for (WitScope scope : scopes) {
+            String name = Names.free(Names.member(scope.owner()) + HANDLES, names);
+            names.add(name);
+            byScope.put(scope, name);
+            parameters.add(new Parameter(types.handlesType(scope), name));
+        }
+        types.withHandles(
+                scope -> byScope.containsKey(scope) ? new NameExpr(byScope.get(scope)) : null);
+        return parameters;
+    }
+
+    private static MethodDeclaration addParameters(
+            MethodDeclaration method, List<Parameter> parameters) {
+        for (Parameter parameter : parameters) {
+            method.addParameter(parameter.clone());
+        }
+        return method;
+    }
+
+    /** What a conversion taking {@code Handles} says about them, or nothing when it takes none. */
+    private static String handlesNote(List<Parameter> handles) {
+        return handles.isEmpty()
+                ? ""
+                : " Each {@code Handles} converts the resource handles it carries to and from the"
+                        + " objects they stand for.";
+    }
+
     private static List<Case> cases(WitType declared) {
         return ((VariantType) declared.defValType()).cases();
     }
@@ -796,13 +865,16 @@ final class InterfaceGenerator {
      * field is written, because a label the map leaves out is stored as a null field rather than
      * reported.
      */
-    private GeneratedUnit recordSource(WitInterface iface, WitType declared) {
+    private GeneratedUnit recordSource(WitInterface iface, WitType declared, boolean exported) {
         String className = Names.type(declared.name());
         GeneratedUnit unit = unitFor(iface);
         WitTypes types = FunctionBindings.forUnit(unit).types();
         WitScope scope = iface.scope();
         RecordType record = (RecordType) declared.defValType();
-        types.requireNoHandles(record, scope);
+        Set<String> taken = new HashSet<>(members(record));
+        taken.add("value");
+        taken.add("fields");
+        List<Parameter> handles = handlesParameters(types, iface, declared, exported, taken);
 
         ClassOrInterfaceDeclaration type = unit.addClass(className);
         type.setJavadocComment(
@@ -840,8 +912,8 @@ final class InterfaceGenerator {
                     .setBody(read);
         }
 
-        type.addMember(lowerRecord(unit, types, scope, record));
-        type.addMember(liftRecord(unit, types, scope, record, className));
+        type.addMember(lowerRecord(unit, types, scope, record, handles));
+        type.addMember(liftRecord(unit, types, scope, record, className, handles));
         type.addMember(recordEquals(unit, record, className));
         type.addMember(recordHashCode(unit, record));
         type.addMember(recordToString(record, className));
@@ -859,7 +931,11 @@ final class InterfaceGenerator {
 
     /** {@code toComponent}, which writes every field under the label the ABI knows it by. */
     private MethodDeclaration lowerRecord(
-            GeneratedUnit unit, WitTypes types, WitScope scope, RecordType record) {
+            GeneratedUnit unit,
+            WitTypes types,
+            WitScope scope,
+            RecordType record,
+            List<Parameter> handles) {
         String fields = Names.free("fields", members(record));
         BlockStmt body = new BlockStmt();
         body.addStatement(
@@ -885,8 +961,9 @@ final class InterfaceGenerator {
         MethodDeclaration method = new MethodDeclaration();
         method.setName("toComponent").setPublic(true).setType(mapOfObject(unit)).setBody(body);
         method.setJavadocComment(
-                "This record as the ABI carries it, which is a map keyed by field label.");
-        return method;
+                "This record as the ABI carries it, which is a map keyed by field label."
+                        + handlesNote(handles));
+        return addParameters(method, handles);
     }
 
     /** {@code fromComponent}, which reads every field back by that same label. */
@@ -895,7 +972,8 @@ final class InterfaceGenerator {
             WitTypes types,
             WitScope scope,
             RecordType record,
-            String className) {
+            String className,
+            List<Parameter> handles) {
         String fields = Names.free("fields", members(record));
         BlockStmt body = new BlockStmt();
         body.addStatement(
@@ -922,8 +1000,8 @@ final class InterfaceGenerator {
                 .setType(AstBuilders.type(className))
                 .setBody(body);
         method.addParameter(AstBuilders.type("Object"), "value");
-        method.setJavadocComment("The record a lifted value carries.");
-        return method;
+        method.setJavadocComment("The record a lifted value carries." + handlesNote(handles));
+        return addParameters(method, handles);
     }
 
     private MethodDeclaration recordEquals(
@@ -1045,15 +1123,13 @@ final class InterfaceGenerator {
                 MethodDeclaration factory =
                         hostSignature(
                                 bindings,
-                                resource,
                                 resource.constructor(),
                                 methods.get(resource.constructor()));
                 factory.setJavadocComment("Makes a {@code " + resource.name() + "}.");
                 type.addMember(factory);
             }
             for (WitFunction function : resource.statics()) {
-                MethodDeclaration method =
-                        hostSignature(bindings, resource, function, methods.get(function));
+                MethodDeclaration method = hostSignature(bindings, function, methods.get(function));
                 method.setJavadocComment(
                         "The static {@code " + resource.name() + "." + function.name() + "}.");
                 type.addMember(method);
@@ -1064,19 +1140,173 @@ final class InterfaceGenerator {
 
     /**
      * One signature on a {@code Host}, named by the caller because neither a constructor nor a
-     * static is called what its own WIT name says. A returned handle is named by hand too, since
-     * an {@code own} has no Java type of its own.
+     * static is called what its own WIT name says.
      */
     private MethodDeclaration hostSignature(
-            FunctionBindings bindings, WitResource resource, WitFunction function, String name) {
-        if (!resource.returnsOwnHandle(function)) {
-            return bindings.signature(function, 0).setName(name);
+            FunctionBindings bindings, WitFunction function, String name) {
+        return bindings.signature(function, 0).setName(name);
+    }
+
+    /**
+     * The resources an imported interface declares, together with the objects the handles to them
+     * stand for.
+     *
+     * <p>A handle carries an integer rather than an object, so a table per resource maps one to the
+     * other, and the destructor hands the object to {@code drop} before forgetting it. Every
+     * handle crossing the boundary converts through here, whichever function it crosses on.
+     */
+    private GeneratedUnit handlesSource(WitInterface iface) {
+        requireNoHandlesClash(iface);
+        GeneratedUnit unit = unitFor(iface);
+
+        ClassOrInterfaceDeclaration type = unit.addClass(HANDLES);
+        type.setJavadocComment(
+                "The resources {@code "
+                        + iface.name()
+                        + "} declares, and the objects the handles to them stand for.");
+
+        Set<String> taken = new HashSet<>();
+        for (WitResource resource : iface.resources()) {
+            taken.add(Names.member(resource.name()));
         }
-        MethodDeclaration method = new MethodDeclaration();
-        method.setName(name);
-        method.setType(AstBuilders.type(Names.type(resource.name())));
-        method.removeBody();
-        return bindings.addParameters(method, function, 0);
+        Map<WitResource, String> tables = new IdentityHashMap<>();
+        for (WitResource resource : iface.resources()) {
+            String table = Names.free(Names.member(resource.name()) + "Table", taken);
+            taken.add(table);
+            tables.put(resource, table);
+        }
+
+        for (WitResource resource : iface.resources()) {
+            type.addField(
+                    unit.use(QualifiedTypes.HOST_RESOURCE),
+                    Names.member(resource.name()),
+                    Modifier.Keyword.PRIVATE,
+                    Modifier.Keyword.FINAL);
+            type.addFieldWithInitializer(
+                    AstBuilders.generic(
+                            unit.use(QualifiedTypes.HOST_RESOURCE_TABLE),
+                            AstBuilders.type(Names.type(resource.name()))),
+                    tables.get(resource),
+                    AstBuilders.construct(
+                            AstBuilders.diamond(unit.use(QualifiedTypes.HOST_RESOURCE_TABLE))),
+                    Modifier.Keyword.PRIVATE,
+                    Modifier.Keyword.FINAL);
+        }
+
+        String builder = Names.free("builder", taken);
+        ConstructorDeclaration constructor = type.addConstructor(Modifier.Keyword.PUBLIC);
+        constructor.addParameter(unit.use(QualifiedTypes.HOST_INSTANCE, "Builder"), builder);
+        constructor.setJavadocComment("Declares each resource into {@code " + builder + "}.");
+        for (WitResource resource : iface.resources()) {
+            Expression destructor =
+                    AstBuilders.lambda(
+                            "rep",
+                            AstBuilders.call(
+                                    new NameExpr(tables.get(resource)),
+                                    "drop",
+                                    new NameExpr("rep"),
+                                    AstBuilders.methodReference(
+                                            AstBuilders.name(Names.type(resource.name())),
+                                            "drop")));
+            constructor
+                    .getBody()
+                    .addStatement(
+                            AstBuilders.assign(
+                                    AstBuilders.thisField(Names.member(resource.name())),
+                                    AstBuilders.call(
+                                            new NameExpr(builder), "declareResource", destructor)));
+        }
+
+        for (WitResource resource : iface.resources()) {
+            addHandleMethods(unit, type, resource, tables.get(resource));
+        }
+        return unit;
+    }
+
+    /**
+     * The resource type, and the two conversions every handle to it goes through, one minting an
+     * owned handle and one finding what a handle stands for.
+     */
+    private void addHandleMethods(
+            GeneratedUnit unit,
+            ClassOrInterfaceDeclaration type,
+            WitResource resource,
+            String table) {
+        ClassOrInterfaceType implementation = AstBuilders.type(Names.type(resource.name()));
+        String field = Names.member(resource.name());
+
+        type.addMethod(Names.resourceTypeGetter(resource.name()), Modifier.Keyword.PUBLIC)
+                .setType(unit.use(QualifiedTypes.HOST_RESOURCE))
+                .setBody(returning(new NameExpr(field)))
+                .setJavadocComment(
+                        "The resource type {@code "
+                                + resource.name()
+                                + "}, with its {@code own} and {@code borrow}.");
+
+        MethodDeclaration own =
+                type.addMethod(Names.ownHandle(resource.name()), Modifier.Keyword.PUBLIC)
+                        .setType(unit.use(QualifiedTypes.RESOURCE_VALUE));
+        own.addParameter(implementation.clone(), VALUE);
+        own.setBody(
+                returning(
+                        AstBuilders.call(
+                                unit.useName(QualifiedTypes.RESOURCE_VALUE),
+                                "owned",
+                                AstBuilders.call(new NameExpr(field), "type"),
+                                AstBuilders.call(
+                                        new NameExpr(table), "add", new NameExpr(VALUE)))));
+        own.setJavadocComment(
+                "Hands {@code value} over as a new owned handle to {@code "
+                        + resource.name()
+                        + "}.");
+
+        MethodDeclaration target =
+                type.addMethod(Names.handleGetter(resource.name()), Modifier.Keyword.PUBLIC)
+                        .setType(implementation.clone());
+        target.addParameter(unit.use(QualifiedTypes.RESOURCE_VALUE), "handle");
+        target.setBody(
+                returning(AstBuilders.call(new NameExpr(table), "get", new NameExpr("handle"))));
+        target.setJavadocComment("The {@code " + resource.name() + "} a handle stands for.");
+
+        MethodDeclaration taken =
+                type.addMethod(Names.handleTaker(resource.name()), Modifier.Keyword.PUBLIC)
+                        .setType(implementation.clone());
+        taken.addParameter(unit.use(QualifiedTypes.RESOURCE_VALUE), "handle");
+        taken.setBody(
+                returning(AstBuilders.call(new NameExpr(table), "take", new NameExpr("handle"))));
+        taken.setJavadocComment(
+                "The {@code "
+                        + resource.name()
+                        + "} an owned handle stands for, whose ownership passes to the caller. It"
+                        + " is forgotten here without being dropped.");
+    }
+
+    /** A WIT type whose Java name would be {@code Handles} is refused, since that name is taken. */
+    private static void requireNoHandlesClash(WitInterface iface) {
+        for (WitType declared : iface.types()) {
+            if (Names.type(declared.name()).equals(HANDLES)) {
+                throw new BindgenException(
+                        "type \""
+                                + declared.name()
+                                + "\" in \""
+                                + iface.name()
+                                + "\" would collide with the generated "
+                                + HANDLES
+                                + " class");
+            }
+        }
+        for (WitResource resource : iface.resources()) {
+            if (Names.type(resource.name()).equals(HANDLES)) {
+                throw new BindgenException(
+                        "resource \""
+                                + resource.name()
+                                + "\" in \""
+                                + iface.name()
+                                + "\" would collide with the generated "
+                                + HANDLES
+                                + " class");
+            }
+        }
     }
 
     /** A resource an imported interface declares, which the embedder implements. */
@@ -1358,6 +1588,11 @@ final class InterfaceGenerator {
         bindings.addParameters(factory, function, 0);
         factory.setBody(body);
         return factory;
+    }
+
+    /** The Java method each resource constructor and static is reached through on a {@code Host}. */
+    static Map<WitFunction, String> hostMethodNames(WitInterface iface) {
+        return ResourceFields.methodNames(iface);
     }
 
     private GeneratedUnit unitFor(WitInterface iface) {
