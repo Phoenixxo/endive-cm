@@ -445,11 +445,10 @@ public final class ComponentLinker {
         }
 
         run.endive.runtime.Instance.Builder coreBuilder =
-                run.endive.runtime.Instance.builder(module).withImportValues(importValues);
-        var machineFactory = builder.instance().store().machineFactory();
-        if (machineFactory != null) {
-            coreBuilder.withMachineFactory(machineFactory);
-        }
+                builder.instance()
+                        .store()
+                        .coreInstanceBuilder(module)
+                        .withImportValues(importValues);
         builder.addCoreInstance(new CoreEndiveInstance(coreBuilder.build()));
     }
 
