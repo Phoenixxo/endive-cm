@@ -5,7 +5,7 @@ import run.endive.cm.types.Type;
 import run.endive.cm.types.ValType;
 
 /**
- * Binds {@link List} to the component {@code list} types.
+ * Binds {@link List} to the component {@code list} types, and {@code byte[]} to a {@code list<u8>}.
  *
  * <p>Only the shape is checked. Java erases the element type, so a {@code List} says nothing about
  * what it holds and there is nothing here to compare against the component type's element That is
@@ -45,6 +45,6 @@ public final class ListHostTypeDescriptor extends HostTypeDescriptor {
     }
 
     static boolean supports(Class<?> hostType) {
-        return List.class.isAssignableFrom(hostType);
+        return List.class.isAssignableFrom(hostType) || hostType == byte[].class;
     }
 }

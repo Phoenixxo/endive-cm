@@ -552,7 +552,7 @@ class BindgenProcessorTest {
                                         + "@Bindgen(world = \"list-payload\", inline ="
                                         + " \"package my:project;\\n"
                                         + "interface blobs {\\n"
-                                        + "  variant blob { empty, bytes(list<u8>) }\\n"
+                                        + "  variant blob { empty, bytes(list<u32>) }\\n"
                                         + "  take: func(b: blob);\\n"
                                         + "}\\n"
                                         + "world list-payload {\\n"
