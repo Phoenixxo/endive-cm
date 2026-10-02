@@ -43,6 +43,30 @@ public class CoreInstanceBuilderTests {
         assertEquals(42L, instance.export("answer").apply()[0]);
     }
 
+    @Test
+    public void closingTheStoreClosesEveryCoreInstance() {
+        List<String> closed = new ArrayList<>();
+        var store =
+                ComponentStore.withCoreInstances(
+                        module ->
+                                Instance.builder(module)
+                                        .withMachineFactory(
+                                                instance ->
+                                                        new InterpreterMachine(instance) {
+                                                            @Override
+                                                            public void close() {
+                                                                closed.add("machine");
+                                                            }
+                                                        }));
+        ComponentLinker.builder().build().instantiate(store, component(), Map.of());
+
+        assertEquals(1, store.coreInstances().size());
+        store.close();
+
+        assertEquals(List.of("machine"), closed);
+        assertEquals(0, store.coreInstances().size());
+    }
+
     private static WasmComponent component() {
         try (InputStream is =
                 CoreInstanceBuilderTests.class.getResourceAsStream(
