@@ -48,7 +48,6 @@ import run.endive.cm.types.FlagsType;
 import run.endive.cm.types.LabelValType;
 import run.endive.cm.types.RecordType;
 import run.endive.cm.types.ResultType;
-import run.endive.cm.types.ValType;
 import run.endive.cm.types.VariantType;
 
 /**
@@ -996,7 +995,13 @@ final class InterfaceGenerator {
                                     new IntegerLiteralExpr(Integer.toString(offset)),
                                     BinaryExpr.Operator.PLUS);
             Expression member = AstBuilders.thisField(Names.member(field.label()));
-            body.addStatement(flatWrite(unit, field.valType(), new NameExpr(memory), at, member));
+            body.addStatement(
+                    flatWrite(
+                            unit,
+                            types.primitiveKind(field.valType(), scope),
+                            new NameExpr(memory),
+                            at,
+                            member));
             offset += layout[0];
         }
 
@@ -1008,17 +1013,21 @@ final class InterfaceGenerator {
         return method;
     }
 
-    /** The write storing one flat field, whose Java carrier is a boxed number or a record. */
+    /**
+     * The write storing one flat field, whose Java carrier is a boxed number or a record.
+     *
+     * @param primitive the field's primitive kind, or {@code null} for a record
+     */
     private static Expression flatWrite(
             GeneratedUnit unit,
-            ValType valType,
+            DefValType.Kind primitive,
             Expression memory,
             Expression at,
             Expression value) {
-        if (valType.primValType() == null) {
+        if (primitive == null) {
             return AstBuilders.call(value, "store", memory, at);
         }
-        switch (valType.primValType().kind()) {
+        switch (primitive) {
             case BOOL:
                 return AstBuilders.call(
                         memory,
@@ -1062,7 +1071,7 @@ final class InterfaceGenerator {
                         at,
                         value);
             default:
-                throw new IllegalStateException("not a flat kind: " + valType.primValType().kind());
+                throw new IllegalStateException("not a flat kind: " + primitive);
         }
     }
 

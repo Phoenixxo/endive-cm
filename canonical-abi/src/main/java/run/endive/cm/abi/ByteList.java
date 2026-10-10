@@ -7,9 +7,10 @@ import java.util.RandomAccess;
 /**
  * A lifted {@code list<u8>}, backed by the bytes copied out of linear memory in one read.
  *
- * <p>It is still a {@link List} of {@link Short}, the values a {@code u8} lifts to,
- * so code reading lifted values generically keeps working.
- * Code that wants the bytes takes them with {@link #toBytes} instead of reading element by element.
+ * <p>It is still a {@link List}, typed like every other lifted list, and its elements are the
+ * {@link Short} values a {@code u8} lifts to, so code reading lifted values generically keeps
+ * working. Code that wants the bytes takes them with {@link #toBytes} instead of reading element
+ * by element.
  */
 public final class ByteList extends AbstractList<Object> implements RandomAccess {
 

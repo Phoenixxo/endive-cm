@@ -87,7 +87,7 @@ final class WitTypes {
         switch (defined.kind()) {
             case LIST:
                 ListType list = (ListType) defined;
-                if (holdsBytes(list)) {
+                if (holdsBytes(list, inner)) {
                     return new ArrayType(PrimitiveType.byteType());
                 }
                 return AstBuilders.generic(
@@ -273,19 +273,30 @@ final class WitTypes {
         }
         if (defined.kind() == DefValType.Kind.LIST) {
             ListType list = (ListType) defined;
-            return holdsBytes(list)
-                    || needsConversion(list.elementType(), scope.declaringScope(valType.typeIdx()));
+            WitScope inner = scope.declaringScope(valType.typeIdx());
+            return holdsBytes(list, inner) || needsConversion(list.elementType(), inner);
         }
         return convertsAtBoundary(defined.kind());
     }
 
     /**
-     * Whether {@code list} is a {@code list<u8>},
-     * which Java carries as a {@code byte[]} so that it crosses the boundary in one copy.
+     * Whether {@code list} is a {@code list<u8>}, which Java carries as a {@code byte[]} so that it
+     * crosses the boundary in one copy. A named {@code u8} counts as one.
      */
-    private static boolean holdsBytes(ListType list) {
-        ValType element = list.elementType();
-        return element.primValType() != null && element.primValType().kind() == DefValType.Kind.U8;
+    private boolean holdsBytes(ListType list, WitScope scope) {
+        return primitiveKind(list.elementType(), scope) == DefValType.Kind.U8;
+    }
+
+    /**
+     * The primitive {@code valType} is, whether written inline or named as in {@code type instant =
+     * u64}, or {@code null} when it is not a primitive.
+     */
+    DefValType.Kind primitiveKind(ValType valType, WitScope scope) {
+        if (valType.primValType() != null) {
+            return valType.primValType().kind();
+        }
+        DefValType defined = definedAt(scope, valType.typeIdx());
+        return defined instanceof PrimValType ? defined.kind() : null;
     }
 
     /**
@@ -295,8 +306,9 @@ final class WitTypes {
      * @see <a href="https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md#alignment">Alignment</a>
      */
     int[] flatLayout(ValType valType, WitScope scope) {
-        if (valType.primValType() != null) {
-            int size = flatSize(valType.primValType().kind());
+        DefValType.Kind primitive = primitiveKind(valType, scope);
+        if (primitive != null) {
+            int size = flatSize(primitive);
             return size == 0 ? null : new int[] {size, size};
         }
         DefValType defined = definedAt(scope, valType.typeIdx());
@@ -350,7 +362,8 @@ final class WitTypes {
             return false;
         }
         DefValType defined = definedAt(scope, valType.typeIdx());
-        return defined.kind() == DefValType.Kind.LIST && holdsBytes((ListType) defined);
+        return defined.kind() == DefValType.Kind.LIST
+                && holdsBytes((ListType) defined, scope.declaringScope(valType.typeIdx()));
     }
 
     /**
@@ -384,7 +397,7 @@ final class WitTypes {
             case OPTION:
                 return lowerOption(value, (OptionType) defined, inner, depth);
             case LIST:
-                if (holdsBytes((ListType) defined)) {
+                if (holdsBytes((ListType) defined, inner)) {
                     return value;
                 }
                 NameExpr element = new NameExpr(elementName(depth));
@@ -804,6 +817,9 @@ final class WitTypes {
         }
         switch (defined.kind()) {
             case LIST:
+                if (holdsBytes((ListType) defined, scope.declaringScope(valType.typeIdx()))) {
+                    return AstBuilders.call(unit.useName(QualifiedTypes.LIST_DESCRIPTOR), "bytes");
+                }
                 return instanceOf(QualifiedTypes.LIST_DESCRIPTOR);
             case ENUM:
             case VARIANT:
