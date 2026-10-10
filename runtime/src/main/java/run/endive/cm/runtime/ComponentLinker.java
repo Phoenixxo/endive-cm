@@ -444,13 +444,11 @@ public final class ComponentLinker {
             importValues = imports.build();
         }
 
-        run.endive.runtime.Instance.Builder coreBuilder =
-                run.endive.runtime.Instance.builder(module).withImportValues(importValues);
-        var machineFactory = builder.instance().store().machineFactory();
-        if (machineFactory != null) {
-            coreBuilder.withMachineFactory(machineFactory);
-        }
-        builder.addCoreInstance(new CoreEndiveInstance(coreBuilder.build()));
+        var store = builder.instance().store();
+        run.endive.runtime.Instance core =
+                store.coreInstanceBuilder(module).withImportValues(importValues).build();
+        store.registerCore(core);
+        builder.addCoreInstance(new CoreEndiveInstance(core));
     }
 
     private void instantiateCoreInlineInstance(
@@ -1727,12 +1725,37 @@ public final class ComponentLinker {
                 return instanceStore.getChildComponents().stream()
                         .anyMatch(component -> component.definition().equals(declaredComponent));
             case TYPE:
-                Type declaredType = containingStore.getType((int) alias.index());
-                return instanceStore.getTypes().stream()
-                        .anyMatch(type -> type.equals(declaredType));
+                ComponentInstance.TypeSlot declared = containingStore.slotAt((int) alias.index());
+                for (int i = 0; i < instanceStore.typeCount(); i++) {
+                    if (sameType(declared, instanceStore.slotAt(i))) {
+                        return true;
+                    }
+                }
+                return false;
             default:
                 throw new UnsupportedOperationException(
                         "Outer alias sort " + alias.sort() + " not yet supported");
+        }
+    }
+
+    /**
+     * Whether two type slots from different index spaces describe the same type.
+     * A declaration that names other types does so by index,
+     * so two identical records written in different spaces differ as parsed
+     * and are compared in their resolved forms instead.
+     */
+    private static boolean sameType(
+            ComponentInstance.TypeSlot declared, ComponentInstance.TypeSlot provided) {
+        if (declared.type().equals(provided.type())) {
+            return true;
+        }
+        if (declared.resourceType() != null || provided.resourceType() != null) {
+            return declared.resourceType() == provided.resourceType();
+        }
+        try {
+            return TypeMatcher.slotsMatch(declared, provided);
+        } catch (UnsupportedOperationException e) {
+            return false;
         }
     }
 
